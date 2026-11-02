@@ -1551,7 +1551,7 @@ modalOverlay.addEventListener('click', (e) => { if (e.target === modalOverlay) c
 function snapshot() {
   return JSON.parse(JSON.stringify({
     canvas: state.canvas,
-    background: { visible: state.background.visible, color: state.background.color },
+    background: { visible: state.background.visible, color: state.background.color, image: state.background.image || null },
     elements: state.elements.map(e => {
       const c = { ...e };
       delete c.imageEl;
@@ -1706,6 +1706,14 @@ function applySnapshot(snap) {
   state.canvas = { ...snap.canvas };
   state.background.visible = snap.background.visible;
   state.background.color = snap.background.color;
+  state.background.image = snap.background.image || null;
+  state.background.imageEl = null;
+  if (state.background.image) {
+    const bgImage = new Image();
+    bgImage.onload = () => { state.background.imageEl = bgImage; draw(); };
+    bgImage.onerror = () => setStatus('Не удалось восстановить фон из истории', 'error');
+    bgImage.src = state.background.image;
+  }
   state.elements = snap.elements.map(e => {
     const el = { ...e };
     if (el.imageUrl) {
@@ -2715,6 +2723,11 @@ function downloadSvg() {
 
 function exportJson() {
   const data = snapshot();
+  data.background = {
+    visible: state.background.visible,
+    color: state.background.color,
+    image: state.background.image || null,
+  };
   data.selectedIds = [];
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
