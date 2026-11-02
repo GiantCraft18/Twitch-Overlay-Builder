@@ -1689,6 +1689,7 @@ function undo() {
   history.index--;
   applySnapshot(history.stack[history.index]);
   updateHistoryButtons();
+  scheduleAutosave();
   setStatus('Отменено');
 }
 
@@ -1697,6 +1698,7 @@ function redo() {
   history.index++;
   applySnapshot(history.stack[history.index]);
   updateHistoryButtons();
+  scheduleAutosave();
   setStatus('Повторено');
 }
 
@@ -2645,22 +2647,44 @@ document.querySelectorAll('.rail-btn').forEach(btn => {
 function downloadPng() {
   const wasGrid = state.showGrid;
   const wasSafe = state.showSafe;
-  state.showGrid = false;
-  state.showSafe = false;
-  draw();
-
-  canvas.toBlob((blob) => {
-    if (!blob) { setStatus('Ошибка экспорта', 'error'); return; }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `overlay-${state.canvas.width}x${state.canvas.height}.png`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    setStatus('PNG скачан', 'success');
+  const restoreEditorView = () => {
     state.showGrid = wasGrid;
     state.showSafe = wasSafe;
     draw();
-  }, 'image/png');
+  };
+
+  try {
+    state.showGrid = false;
+    state.showSafe = false;
+    draw();
+
+    canvas.toBlob((blob) => {
+      try {
+        if (!blob) {
+          setStatus('Браузер не смог создать PNG. Попробуй уменьшить размер холста.', 'error');
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `overlay-${state.canvas.width}x${state.canvas.height}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setStatus('PNG скачан', 'success');
+      } catch (error) {
+        console.error('[OverlayForge] Ошибка сохранения PNG:', error);
+        setStatus('Не удалось скачать PNG', 'error');
+      } finally {
+        restoreEditorView();
+      }
+    }, 'image/png');
+  } catch (error) {
+    console.error('[OverlayForge] Ошибка подготовки PNG:', error);
+    restoreEditorView();
+    setStatus('Ошибка экспорта PNG. Проверь размер холста и изображения.', 'error');
+  }
 }
 
 function downloadSvg() {
