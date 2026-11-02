@@ -1571,7 +1571,118 @@ function pushHistory() {
   if (history.stack.length > history.limit) history.stack.shift();
   history.index = history.stack.length - 1;
   updateHistoryButtons();
+  scheduleAutosave();
 }
+
+// ─── AUTOSAVE / RECOVERY ─────────────────────────────
+const AUTOSAVE_KEY = 'overlayforge-autosave-v1';
+const AUTOSAVE_DEBOUNCE_MS = 500;
+let autosaveTimer = null;
+let autosaveRestored = false;
+
+function createAutosavePayload() {
+  const data = snapshot();
+  data.background = {
+    visible: state.background.visible,
+    color: state.background.color,
+    image: state.background.image || null,
+  };
+  data.savedAt = new Date().toISOString();
+  data.version = 1;
+  return data;
+}
+
+function saveAutosave() {
+  if (!autosaveRestored) return;
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(createAutosavePayload()));
+  } catch (error) {
+    console.warn('[OverlayForge] Автосохранение недоступно:', error);
+    setStatus('Не удалось выполнить автосохранение — скачай проект в JSON', 'error');
+  }
+}
+
+function scheduleAutosave() {
+  if (!autosaveRestored) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(saveAutosave, AUTOSAVE_DEBOUNCE_MS);
+}
+
+function restoreAutosave() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) {
+      autosaveRestored = true;
+      return false;
+    }
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.elements) || !data.canvas) {
+      localStorage.removeItem(AUTOSAVE_KEY);
+      autosaveRestored = true;
+      return false;
+    }
+
+    state.canvas = {
+      width: Number(data.canvas.width) || 1920,
+      height: Number(data.canvas.height) || 1080,
+    };
+    state.background.visible = Boolean(data.background?.visible);
+    state.background.color = data.background?.color || '#1a1a2e';
+    state.background.image = data.background?.image || null;
+    state.background.imageEl = null;
+
+    if (state.background.image) {
+      const bgImage = new Image();
+      bgImage.onload = () => { state.background.imageEl = bgImage; draw(); };
+      bgImage.onerror = () => {
+        state.background.image = null;
+        state.background.imageEl = null;
+        setStatus('Фоновое изображение не удалось восстановить', 'error');
+      };
+      bgImage.src = state.background.image;
+    }
+
+    state.elements = data.elements.map(item => {
+      const el = { ...item };
+      delete el.imageEl;
+      delete el.videoEl;
+      if (el.imageUrl) {
+        const img = new Image();
+        img.onload = () => draw();
+        img.onerror = () => setStatus('Одно из изображений не удалось восстановить', 'error');
+        img.src = el.imageUrl;
+        el.imageEl = img;
+      }
+      if (el.videoUrl) {
+        const video = document.createElement('video');
+        video.src = el.videoUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.addEventListener('loadeddata', () => draw());
+        el.videoEl = video;
+      }
+      const numericId = Number(el.id);
+      if (Number.isFinite(numericId)) uid = Math.max(uid, numericId);
+      if (!el.id) el.id = nextId();
+      return el;
+    });
+
+    state.selectedIds = [];
+    autosaveRestored = true;
+    return true;
+  } catch (error) {
+    console.warn('[OverlayForge] Не удалось восстановить автосохранение:', error);
+    autosaveRestored = true;
+    setStatus('Автосохранение повреждено — начат пустой проект', 'error');
+    return false;
+  }
+}
+
+window.addEventListener('beforeunload', () => {
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  saveAutosave();
+});
 
 function undo() {
   if (history.index <= 0) return;
@@ -3294,6 +3405,7 @@ setInterval(() => {
 }, 33);
 
 // ─── INIT ──────────────────────────────────────────────
+restoreAutosave();
 try {
   const savedTheme = localStorage.getItem('overlayforge-theme');
   if (savedTheme) applyTheme(savedTheme);
