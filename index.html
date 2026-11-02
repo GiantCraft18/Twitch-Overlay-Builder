@@ -2732,41 +2732,95 @@ function importJson() {
   input.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      setStatus('JSON-файл больше 25 МБ', 'error');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!data.elements || !Array.isArray(data.elements)) throw new Error('Неверный формат');
-        data.elements.forEach(el => {
+        if (!data || !Array.isArray(data.elements)) {
+          throw new Error('В файле нет массива elements');
+        }
+
+        const canvasData = data.canvas || {};
+        const width = Number(canvasData.width) || state.canvas.width;
+        const height = Number(canvasData.height) || state.canvas.height;
+        if (!Number.isFinite(width) || !Number.isFinite(height) ||
+            width < 100 || height < 100 || width > 8192 || height > 8192) {
+          throw new Error('Недопустимый размер холста (100–8192 px)');
+        }
+
+        const importedElements = data.elements.map(source => {
+          if (!source || typeof source !== 'object' || !source.type) {
+            throw new Error('Обнаружен повреждённый элемент');
+          }
+          const el = { ...source };
           if (!el.id) el.id = nextId();
-          else { const n = +el.id; if (n > uid) uid = n; }
+          else {
+            const n = Number(String(el.id).replace(/\\D/g, ''));
+            if (Number.isFinite(n) && n > uid) uid = n;
+          }
+          delete el.imageEl;
+          delete el.videoEl;
+
           if (el.imageUrl) {
             const img = new Image();
+            img.onload = () => draw();
+            img.onerror = () => setStatus('Не удалось загрузить изображение элемента', 'error');
             img.src = el.imageUrl;
             el.imageEl = img;
           }
+          if (el.videoUrl) {
+            const video = document.createElement('video');
+            video.crossOrigin = 'anonymous';
+            video.src = el.videoUrl;
+            video.loop = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.addEventListener('loadedmetadata', draw);
+            video.play().catch(() => {});
+            el.videoEl = video;
+          }
+          return el;
         });
-        state.canvas = data.canvas || state.canvas;
-        state.background.visible = data.background?.visible || false;
+
+        state.canvas = { ...state.canvas, width, height };
+        state.background.visible = data.background?.visible ?? false;
         state.background.color = data.background?.color || '#1a1a2e';
-        state.elements = data.elements;
+        state.background.image = data.background?.image || null;
+        state.background.imageEl = null;
+        if (state.background.image) {
+          const bg = new Image();
+          bg.onload = () => draw();
+          bg.onerror = () => setStatus('Не удалось загрузить фоновое изображение', 'error');
+          bg.src = state.background.image;
+          state.background.imageEl = bg;
+        }
+
+        state.elements = importedElements;
         state.selectedIds = [];
-        canvas.width = state.canvas.width;
-        canvas.height = state.canvas.height;
-        canvasInfo.textContent = `${state.canvas.width} × ${state.canvas.height}`;
-        document.getElementById('canvasW').value = state.canvas.width;
-        document.getElementById('canvasWVal').textContent = state.canvas.width;
-        document.getElementById('canvasH').value = state.canvas.height;
-        document.getElementById('canvasHVal').textContent = state.canvas.height;
+        canvas.width = width;
+        canvas.height = height;
+        canvasInfo.textContent = `${width} × ${height}`;
+        document.getElementById('canvasW').value = width;
+        document.getElementById('canvasWVal').textContent = width;
+        document.getElementById('canvasH').value = height;
+        document.getElementById('canvasHVal').textContent = height;
         updateRulers();
-        renderAll(); pushHistory();
-        setStatus('Проект загружен', 'success');
+        renderAll();
+        pushHistory();
+        scheduleAutosave();
+        setStatus('Проект успешно загружен', 'success');
         switchView('editor');
       } catch (err) {
-        console.error(err);
-        setStatus('Ошибка загрузки', 'error');
+        console.error('[OverlayForge] Ошибка импорта проекта:', err);
+        setStatus(err.message || 'Не удалось загрузить JSON-проект', 'error');
       }
     };
+    reader.onerror = () => setStatus('Не удалось прочитать файл', 'error');
     reader.readAsText(file);
   });
   input.click();
@@ -3130,6 +3184,7 @@ document.getElementById('bgCanvasColor').addEventListener('input', (e) => {
   draw();
 });
 document.getElementById('bgCanvasColor').addEventListener('change', pushHistory);
+document.getElementById('bgCanvasColor').addEventListener('change', scheduleAutosave);
 document.getElementById('btnBgImage').addEventListener('click', () => document.getElementById('bgImageInput').click());
 document.getElementById('bgImageInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
