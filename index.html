@@ -2697,8 +2697,18 @@ function downloadPng() {
 
 function downloadSvg() {
   const svgParts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${state.canvas.width}" height="${state.canvas.height}" viewBox="0 0 ${state.canvas.width} ${state.canvas.height}">`];
+  if (state.background.visible) {
+    if (state.background.image) {
+      svgParts.push(`<image href="${state.background.image}" x="0" y="0" width="${state.canvas.width}" height="${state.canvas.height}" preserveAspectRatio="xMidYMid slice"/>`);
+    } else {
+      svgParts.push(`<rect x="0" y="0" width="${state.canvas.width}" height="${state.canvas.height}" fill="${state.background.color}"/>`);
+    }
+  }
   state.elements.forEach(el => {
     if (el.hidden) return;
+    if (el.type === 'image' && el.imageUrl) {
+      svgParts.push(`<image href="${el.imageUrl}" x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" preserveAspectRatio="xMidYMid meet"/>`);
+    }
     if (['shape','webcam','chat','alert','goal','counter','timer'].includes(el.type)) {
       const c = el.corners || { tl: 0 };
       svgParts.push(`<rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" rx="${c.tl || el.radius || 0}" fill="${hexToRgba(el.fill, el.fillAlpha)}" ${el.stroke.enabled ? `stroke="${el.stroke.color}" stroke-width="${el.stroke.width}"` : ''}/>`);
